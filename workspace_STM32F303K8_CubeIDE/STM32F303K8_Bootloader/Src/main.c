@@ -55,131 +55,42 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-#define main bootloader_main
-
-
-extern int _main_data_start; // リンカスクリプトで定義したバイナリ転送先アドレス
-
-// OK
-typedef void(*pFunction)(void);
-pFunction JumpToApplication;
-#define APP_ADDRESS 0x08002000
-#define APP_STACK   (APP_ADDRESS + 0)
-#define APP_RESET_HANDLER (APP_ADDRESS + 4)
-
-void JumpToAPP(void)
-{
-    uint32_t JumpAddress = *(__IO uint32_t*)APP_RESET_HANDLER;
-    JumpToApplication = (pFunction)JumpAddress;
-    __set_MSP(*(__IO uint32_t*)APP_STACK);
-    JumpToApplication();
-}
 
 #define RAMAPP_ADDRESS 0x20000800
 #define RAMAPP_STACK   (RAMAPP_ADDRESS + 0)
 #define RAMAPP_RESET_HANDLER (RAMAPP_ADDRESS + 4)
-void JumpToRAMApp(void)
-{
-    uint32_t JumpAddress = *(__IO uint32_t*)RAMAPP_RESET_HANDLER;
-    JumpToApplication = (pFunction)JumpAddress;
-    __set_MSP(*(__IO uint32_t*)RAMAPP_STACK);
-    JumpToApplication();
-}
+#define SET_VECTOR_TABLE 1
 
-
-
-////NXP func
-////*****************************************************************************
-//// Functions to carry out the initialization of RW and BSS data sections. These
-//// are written as separate functions rather than being inlined within the
-//// ResetISR() function in order to cope with MCUs with multiple banks of
-//// memory.
-////*****************************************************************************
-//__attribute__ ((section(".after_vectors.init_data")))
-//void data_init(unsigned int romstart, unsigned int start, unsigned int len) {
-//    unsigned int *pulDest = (unsigned int*) start;
-//    unsigned int *pulSrc = (unsigned int*) romstart;
-//    unsigned int loop;
-//    for (loop = 0; loop < len; loop = loop + 4)
-//        *pulDest++ = *pulSrc++;
-//}
-//
-//__attribute__ ((section(".after_vectors.init_bss")))
-//void bss_init(unsigned int start, unsigned int len) {
-//    unsigned int *pulDest = (unsigned int*) start;
-//    unsigned int loop;
-//    for (loop = 0; loop < len; loop = loop + 4)
-//        *pulDest++ = 0;
-//}
-//
-//
-//extern unsigned int __data_section_table;
-//extern unsigned int __data_section_table_end;
-//extern unsigned int __bss_section_table;
-//extern unsigned int __bss_section_table_end;
-//void cpdata() {
-//    //
-//    // Copy the data sections from flash to SRAM.
-//    //
-//    unsigned int LoadAddr, ExeAddr, SectionLen;
-//    unsigned int *SectionTableAddr;
-//
-//    // Load base address of Global Section Table
-//    SectionTableAddr = &__data_section_table;
-//
-//    // Copy the data sections from flash to SRAM.
-//    while (SectionTableAddr < &__data_section_table_end) {
-//        LoadAddr = *SectionTableAddr++;
-//        ExeAddr = *SectionTableAddr++;
-//        SectionLen = *SectionTableAddr++;
-//        data_init(LoadAddr, ExeAddr, SectionLen);
-//    }
-//
-//    // At this point, SectionTableAddr = &__bss_section_table;
-//    // Zero fill the bss segment
-//    while (SectionTableAddr < &__bss_section_table_end) {
-//        ExeAddr = *SectionTableAddr++;
-//        SectionLen = *SectionTableAddr++;
-//        bss_init(ExeAddr, SectionLen);
-//    }
-//}
-//
-////
-
-//example code as to how to do this copy and then jump to start of the application
 #define DefROM_BIN_TOP    (0x08002000)
 #define DefDST_RAM_TOP    (0x20000800)
 
-__attribute__((always_inline)) static inline void JumpApplication(uint32_t topOfMainStack, uint32_t AppliAddr)
+typedef void(*pFunction)(void);
+pFunction JumpToApplication;
+
+int ROMtoRAM(uint32_t pROMADDR , uint32_t pRAMADDR, uint32_t u32BinSize)
 {
-	volatile uint32_t test = AppliAddr;
- __ASM volatile ("mov r13, %0" : : "r" (topOfMainStack) : );
- __ASM volatile ("mov r15, %0" : : "r" (AppliAddr) : );
+	memset((void*)pRAMADDR, 0, u32BinSize);
+    memcpy((void*)pRAMADDR, (void*)(pROMADDR), u32BinSize);
+    /* Verify */
+    if(memcmp((void*)(pROMADDR), (void*)pRAMADDR, u32BinSize) == 0) {
+    	//true
+    	return 1;
+    }
+    //false
+    return 0;
 }
 
-_Bool ExampleCheckROM(uint32_t u32BinSize)
+void JumpToAPP(uint32_t pResetHandlerAddr, uint32_t pVTORAddr, uint32_t pStackAddr)
 {
-	memset((void*)DefDST_RAM_TOP, 0, u32BinSize);
+    uint32_t JumpAddress = *(__IO uint32_t*)pResetHandlerAddr;
+    JumpToApplication = (pFunction)JumpAddress;
 
-    memcpy((void*)DefDST_RAM_TOP, (void*)(DefROM_BIN_TOP), u32BinSize);
+#if (SET_VECTOR_TABLE)
+    SCB->VTOR = pVTORAddr; // ベクタテーブルを設定
+#endif
 
- /** Verify */
-    if(memcmp((void*)(DefROM_BIN_TOP), (void*)DefDST_RAM_TOP, u32BinSize) == 0) {
-//        printf("memcpy OK\r\n");
-//        vTaskDelay(100u);
-
-//        NVIC_DisableIRQ();
-//        ARM_MPU_Disable();
-//        SCB_DisableDCache();
-//        SCB_DisableICache();
-
-
-    	JumpToRAMApp();
-/** Set Stack Pointer and PC */
-        JumpApplication(*(uint32_t*)DefDST_RAM_TOP, *(uint32_t*)(DefDST_RAM_TOP + 4));
-    }
-
-    return 1;
+    __set_MSP(*(__IO uint32_t*)pStackAddr);
+    JumpToApplication();
 }
 
 /* USER CODE END 0 */
@@ -188,6 +99,7 @@ _Bool ExampleCheckROM(uint32_t u32BinSize)
   * @brief  The application entry point.
   * @retval int
   */
+#define main bootloader_main
 int main(void)
 {
   /* USER CODE BEGIN 1 */
@@ -211,17 +123,38 @@ int main(void)
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
-//  MX_GPIO_Init();
+  MX_GPIO_Init();
 //  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_SET);
+  HAL_Delay(125);
+
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_RESET);
+  HAL_Delay(125);
+
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_SET);
+  HAL_Delay(125);
+
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_RESET);
+  HAL_Delay(125);
+
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_SET);
+  HAL_Delay(125);
+
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_RESET);
+  HAL_Delay(125);
+
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_SET);
+  HAL_Delay(125);
+
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_RESET);
+  HAL_Delay(125);
+
   	//8k Byte = 8Byte * 1024 = 8192 byte
-	ExampleCheckROM(8192);
-
-//	memcpy((void*)DefDST_RAM_TOP, (void*)(DefROM_BIN_TOP), 1280);
-//	RAM_JumpToAPP();
-	JumpToAPP();
-
+	if( ROMtoRAM(0x08002000, 0x20000800, 0x2000) ) {
+		JumpToAPP(RAMAPP_RESET_HANDLER, RAMAPP_ADDRESS, RAMAPP_STACK);
+	}
 
   /* USER CODE END 2 */
 
